@@ -65,51 +65,114 @@ install_pkg_yum() {
 }
 
 detect_os() {
-  if [[ "$OSTYPE" == "darwin"* ]]; then
+  # First handle macOS cleanly.
+  if [[ "$(uname -s)" == "Darwin" ]]; then
     echo "macos"
     return
   fi
+
+  # Then handle Linuxes.
   if [[ -f /etc/os-release ]]; then
+    # shellcheck disable=SC1091
     . /etc/os-release
-    case "$ID" in
-      ubuntu|debian) echo "debian"; return ;;
-      centos|rhel|rocky|almalinux|fedora) echo "rhel"; return ;;
+
+    # normalize to lowercase because some distros scream in caps
+    local id_lc=""
+    if [[ -n "${ID:-}" ]]; then
+      id_lc="$(echo "$ID" | tr '[:upper:]' '[:lower:]')"
+    fi
+
+    local id_like_lc=""
+    if [[ -n "${ID_LIKE:-}" ]]; then
+      id_like_lc="$(echo "$ID_LIKE" | tr '[:upper:]' '[:lower:]')"
+    fi
+
+    # direct known matches
+    case "$id_lc" in
+      ubuntu|debian)
+        echo "debian"
+        return
+        ;;
+
+      centos|rhel|rocky|almalinux|fedora|ol|redhat|alinux|anolis)
+        # alinux (Alibaba Cloud Linux) and anolis are RHEL-family
+        echo "rhel"
+        return
+        ;;
     esac
+
+    # fallback via ID_LIKE (helps with custom/cloud distros)
+    if [[ "$id_like_lc" == *"debian"* ]]; then
+        echo "debian"
+        return
+    fi
+    if [[ "$id_like_lc" == *"rhel"* || "$id_like_lc" == *"centos"* || "$id_like_lc" == *"fedora"* || "$id_like_lc" == *"rocky"* || "$id_like_lc" == *"almalinux"* || "$id_like_lc" == *"anolis"* || "$id_like_lc" == *"alinux"* ]]; then
+        echo "rhel"
+        return
+    fi
+
+    # couldn't classify but it's still Linux
+    echo "linux"
+    return
   fi
+
+  # If we got here, we're in something cursed (BusyBox initrd, etc.)
   echo "unknown"
 }
 
+
 ensure_zsh() {
   if command -v zsh >/dev/null 2>&1; then
-    success "zsh already installed: $(command -v zsh)"
+    msg "zsh already installed: $(command -v zsh)"
     return
   fi
 
   case "$OS" in
     macos)
-      info "📦 Installing zsh via Homebrew..."
-      install_pkg_mac zsh
-      success "zsh installed successfully"
+      msg "Installing zsh/git/curl via brew"
+      install_pkg_mac
       ;;
+
     debian)
-      info "📦 Installing zsh via apt..."
-      install_pkg_apt zsh git curl
-      success "zsh installed successfully"
+      msg "Installing zsh/git/curl via apt"
+      install_pkg_apt
       ;;
+
     rhel)
-      info "📦 Installing zsh via yum..."
-      install_pkg_yum zsh git curl
-      success "zsh installed successfully"
+      msg "Installing zsh/git/curl via yum/dnf"
+      # some rhel-ish distros use yum, some swapped to dnf, some alias yum->dnf
+      if command -v yum >/dev/null 2>&1; then
+        install_pkg_yum
+      elif command -v dnf >/dev/null 2>&1; then
+        sudo dnf install -y zsh git curl
+      else
+        msg "No yum/dnf found on rhel-like system. Please install zsh manually."
+        exit 1
+      fi
       ;;
+
+    linux)
+      msg "Generic Linux detected, attempting apt/yum fallback"
+      if command -v apt >/dev/null 2>&1; then
+        install_pkg_apt
+      elif command -v yum >/dev/null 2>&1; then
+        install_pkg_yum
+      elif command -v dnf >/dev/null 2>&1; then
+        sudo dnf install -y zsh git curl
+      else
+        msg "Couldn't find apt, yum or dnf. Manual intervention required."
+        exit 1
+      fi
+      ;;
+
     *)
-      error "OS not recognized: $OS"
-      info "💡 Hint: This script supports macOS, Debian/Ubuntu, and RHEL/CentOS"
-      info "   For other systems, please install zsh manually first"
-      info "   Then run this script again to continue with Oh My Zsh setup"
+      msg "OS not recognized. Couldn't auto-install zsh."
       exit 1
       ;;
   esac
 }
+
+
 
 install_oh_my_zsh() {
   if [[ -d "${HOME}/.oh-my-zsh" ]]; then
