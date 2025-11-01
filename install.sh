@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ---------- helper funcs ----------
 
-msg() { printf "\n[%s] %s\n" "$(date +%H:%M:%S)" "$*"; }
+msg() { printf "\n[%s] %s %s\n" "$(date +%H:%M:%S)" "$1" "${2:-}"; }
 success() { printf "\n[%s] ✅ %s\n" "$(date +%H:%M:%S)" "$*"; }
 error() { printf "\n[%s] ❌ %s\n" "$(date +%H:%M:%S)" "$*" >&2; }
 warning() { printf "\n[%s] ⚠️  %s\n" "$(date +%H:%M:%S)" "$*"; }
@@ -21,6 +21,7 @@ need_cmd() {
 }
 
 install_pkg_mac() {
+  local packages="zsh git curl"
   # macOS assumed to have brew already. if not, enjoy pain.
   if ! command -v brew >/dev/null 2>&1; then
     error "Homebrew not found!"
@@ -29,14 +30,18 @@ install_pkg_mac() {
     info "   Visit https://brew.sh for more information"
     exit 1
   fi
-  if ! brew install "$@"; then
-    error "Failed to install packages: $*"
+  info "Installing packages: $packages"
+  if ! brew install $packages; then
+    error "Failed to install packages: $packages"
     info "💡 Hint: Try running 'brew update' first, then retry installation"
+    info "   Try manually: brew install $packages"
     exit 1
   fi
+  success "Successfully installed: $packages"
 }
 
 install_pkg_apt() {
+  local packages="zsh git curl"
   info "Updating package lists..."
   if ! sudo apt update; then
     error "Failed to update package lists"
@@ -44,24 +49,38 @@ install_pkg_apt() {
     info "   If using sudo, ensure you have proper permissions"
     exit 1
   fi
-  info "Installing packages: $*"
-  if ! sudo apt install -y "$@"; then
-    error "Failed to install packages: $*"
-    info "💡 Hint: Check if packages exist: apt search <package-name>"
+  info "Installing packages: $packages"
+  if ! sudo apt install -y $packages; then
+    error "Failed to install packages: $packages"
+    info "💡 Hint: Check if packages exist: apt search zsh"
     info "   Ensure your package sources are up to date"
+    info "   Try manually: sudo apt install -y $packages"
     exit 1
   fi
+  success "Successfully installed: $packages"
 }
 
 install_pkg_yum() {
-  info "Installing packages: $*"
-  if ! sudo yum install -y "$@"; then
-    error "Failed to install packages: $*"
-    info "💡 Hint: Try 'sudo dnf install' instead if on newer RHEL/Fedora"
-    info "   Check if packages exist: yum search <package-name>"
+  local packages="zsh git curl"
+  info "Installing packages: $packages"
+  
+  # Update yum cache first for better reliability
+  info "Updating package cache..."
+  if ! sudo yum makecache -q; then
+    warning "Package cache update failed, continuing anyway..."
+  fi
+  
+  # Install packages explicitly
+  if ! sudo yum install -y $packages; then
+    error "Failed to install packages: $packages"
+    info "💡 Hint: Try 'sudo dnf install -y $packages' instead if on newer RHEL/Fedora"
+    info "   Check if packages exist: yum search zsh"
     info "   Ensure your package sources are configured correctly"
+    info "   Try manually: sudo yum install -y $packages"
     exit 1
   fi
+  
+  success "Successfully installed: $packages"
 }
 
 detect_os() {
@@ -123,50 +142,66 @@ detect_os() {
 
 ensure_zsh() {
   if command -v zsh >/dev/null 2>&1; then
-    msg "zsh already installed: $(command -v zsh)"
+    msg "zsh already installed" "$(command -v zsh)"
     return
   fi
 
   case "$OS" in
     macos)
-      msg "Installing zsh/git/curl via brew"
+      msg "Installing zsh/git/curl" "via brew"
       install_pkg_mac
       ;;
 
     debian)
-      msg "Installing zsh/git/curl via apt"
+      msg "Installing zsh/git/curl" "via apt"
       install_pkg_apt
       ;;
 
     rhel)
-      msg "Installing zsh/git/curl via yum/dnf"
+      msg "Installing zsh/git/curl" "via yum/dnf"
       # some rhel-ish distros use yum, some swapped to dnf, some alias yum->dnf
       if command -v yum >/dev/null 2>&1; then
         install_pkg_yum
       elif command -v dnf >/dev/null 2>&1; then
-        sudo dnf install -y zsh git curl
+        info "Using dnf package manager"
+        local packages="zsh git curl"
+        if ! sudo dnf install -y $packages; then
+          error "Failed to install packages: $packages"
+          info "💡 Hint: Check if packages exist: dnf search zsh"
+          info "   Try manually: sudo dnf install -y $packages"
+          exit 1
+        fi
+        success "Successfully installed: $packages"
       else
-        msg "No yum/dnf found on rhel-like system. Please install zsh manually."
+        msg "No yum/dnf found on rhel-like system" "Please install zsh manually"
         exit 1
       fi
       ;;
 
     linux)
-      msg "Generic Linux detected, attempting apt/yum fallback"
+      msg "Generic Linux detected" "attempting apt/yum fallback"
+      local packages="zsh git curl"
       if command -v apt >/dev/null 2>&1; then
         install_pkg_apt
       elif command -v yum >/dev/null 2>&1; then
         install_pkg_yum
       elif command -v dnf >/dev/null 2>&1; then
-        sudo dnf install -y zsh git curl
+        info "Using dnf package manager"
+        if ! sudo dnf install -y $packages; then
+          error "Failed to install packages: $packages"
+          info "💡 Hint: Check if packages exist: dnf search zsh"
+          info "   Try manually: sudo dnf install -y $packages"
+          exit 1
+        fi
+        success "Successfully installed: $packages"
       else
-        msg "Couldn't find apt, yum or dnf. Manual intervention required."
+        msg "Couldn't find apt, yum or dnf" "Manual intervention required"
         exit 1
       fi
       ;;
 
     *)
-      msg "OS not recognized. Couldn't auto-install zsh."
+      msg "OS not recognized" "Couldn't auto-install zsh"
       exit 1
       ;;
   esac
